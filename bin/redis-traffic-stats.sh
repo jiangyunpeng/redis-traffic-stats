@@ -1,9 +1,9 @@
 #!/bin/bash
 set -e -o pipefail
 BASE_DIR=$( cd "$(dirname "${BASH_SOURCE[0]}")" && pwd);
-JAR_FILE_NAME="wacai-redis-traffic-stats.jar"
+JAR_FILE_NAME="redis-traffic-stats.jar"
 JAR_FILE="$BASE_DIR/$JAR_FILE_NAME"
-DOWNLOAD_URL=""
+DOWNLOAD_URL="https://raw.githubusercontent.com/jiangyunpeng/redis-traffic-stats/master/bin/redis-traffic-stats.jar"
 PCAP_FILE=$1
 OPTIONS=$2
 
