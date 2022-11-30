@@ -5,7 +5,8 @@ redis-traffic-stats is a analyzer for redis, likely [hirose31/redis-traffic-stat
 ## Usage
 ```
 
-tcpdump -n -s 0 tcp port 6385 -w redis.pcap -i bond0 
+tcpdump -n -s 0 tcp port 6394 -w redis.pcap -i bond0
+tcpdump -n -s 0 tcp port 6390 -w redis.pcap -i bond0
 
 sh redis-traffic-stats.sh redis.pcap
 sh redis-traffic-stats.sh redis.pcap -d #detail

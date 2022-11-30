@@ -36,6 +36,7 @@ public class RedisTrafficParser {
     private String source;
     private String destination;
     private Option option;
+    private long discardResponseBytes;//这里记录无法找到key的流量
 
     public RedisTrafficParser(Option option) {
         this.option = option;
@@ -63,31 +64,37 @@ public class RedisTrafficParser {
             return true;
         }
         IPPacket ipPacket = tcpPacket.getParentPacket();
+        //必须区分端口号，否则数据不准
         source = ipPacket.getSourceIP() + ":" + tcpPacket.getSourcePort();
         destination = ipPacket.getDestinationIP() + ":" + tcpPacket.getDestinationPort();
         int payloadLength = tcpPacket.getPayload().getArray().length;
-        ++requestCount;
         if (tcpPacket.getArrivalTime() < beginTs.get()) {
             beginTs.set(tcpPacket.getArrivalTime());
         }
         if (tcpPacket.getArrivalTime() > endTs.get()) {
             endTs.set(tcpPacket.getArrivalTime());
         }
-        //System.out.println(noCount + "\t" + tcpPacket.getArrivalTime() + "\t" + ipPacket.getSourceIP() + "\t" + ipPacket.getDestinationIP() + "\t" + tcpPacket.getPayload().getArray().length);
+        //System.out.println(noCount + "\t" + tcpPacket.getArrivalTime() + "\t" + ipPacket.getSourceIP()+":"+tcpPacket.getSourcePort() + "\t" + ipPacket.getDestinationIP()+":"+tcpPacket.getDestinationPort()+  "\t" + tcpPacket.getPayload().getArray().length);
         boolean incoming = isDestinationRedis(tcpPacket);
         if (incoming) {
+            ++requestCount;
             inBytes += payloadLength;
             setServer(destination);
             clients.add(source);
             processRequest(source, tcpPacket);
         } else {
             outBytes += payloadLength;
-            //add to participants if destination don't belong to clients
-            if (!clients.contains(destination)) {
+            String redisHostPrefix = source.substring(0,source.lastIndexOf("."));
+            String destHostPrefix = destination.substring(0,destination.lastIndexOf("."));
+            //如果是同一个网段加入participants
+            if (redisHostPrefix.equals(destHostPrefix)) {
                 participants.add(destination);
                 processHorizontal(source, destination, tcpPacket);
             } else {
-                processResponse(destination, tcpPacket);
+                if(!processResponse(destination, tcpPacket)){
+                   //System.err.println(noCount+" not found client! client="+destination+", payloadLength="+payloadLength);
+                    discardResponseBytes+=payloadLength;
+                }
             }
         }
         return true;
@@ -156,16 +163,18 @@ public class RedisTrafficParser {
         return ret;
     }
 
-    private void processResponse(String client, TCPPacket tcpPacket) throws IOException {
+    private boolean processResponse(String client, TCPPacket tcpPacket) throws IOException {
+        //说明包中没有包含之前client端请求的数据，这样我们就无法知道是哪个key
         if (!clientCommandMap.containsKey(client)) {
-            return;
+            return false;
         }
         Deque<Command> queue = clientCommandMap.get(client);
         Command last = queue.peekLast();
         if (last == null) {
-            return;
+            return false;
         }
         last.setResBytes(last.getResBytes() + tcpPacket.getPayload().getArray().length);
+        return true;
     }
 
     private void processHorizontal(String source, String destination, TCPPacket tcp) throws IOException {
@@ -248,7 +257,9 @@ public class RedisTrafficParser {
                 .stream()
                 .flatMap(Queue::stream)
                 .collect(Collectors.toList());
-
+        if(discardResponseBytes>0){
+            System.err.println("因pcap文件数据不全，无法确定key的response流量: "+FormatUtils.humanReadableByteSize(discardResponseBytes));
+        }
         print("## Summary");
         print("* Duration:");
         print(" * %s - %s (%ds)", formatTime(beginTs.get()), formatTime(endTs.get()), costSec());
@@ -298,7 +309,7 @@ public class RedisTrafficParser {
                         FormatUtils.humanReadableByteSize(entry.getValue().getOutBytes())
                 );
             }
-            print("## Cluster Command Detail (%d)", participantCommands.size());
+            print("## Cluster Inner Command Detail (%d)", participantCommands.size());
             print("");
             print(table.toString());
 
